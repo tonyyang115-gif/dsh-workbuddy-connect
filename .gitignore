@@ -1,0 +1,9 @@
+**/node_modules/
+**/coverage/
+**/.dsh/
+.DS_Store
+*.log
+.env
+.env.*
+!**/.env.example
+AGENTS.md
