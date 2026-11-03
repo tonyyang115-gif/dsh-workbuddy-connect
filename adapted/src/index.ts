@@ -127,6 +127,7 @@ export {
   prepareCnChatBody,
   prepareInternationalChatBody,
   regionOf,
+  relocateCnSystemPrompt,
   WorkBuddyUpstreamClient,
   type UpstreamErrorKind,
   type WorkBuddyCatalogFetch,

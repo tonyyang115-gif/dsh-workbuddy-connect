@@ -1,4 +1,4 @@
-import { $ as FALLBACK_CN_APP_VERSION, A as CHANNEL_REJECTED_MESSAGE, B as regionOf, C as AI_VARIANT, E as variantFor, F as normalizeCredits, G as wireCaptureEnabled, H as readWireLedgerTail, I as parseModelCatalog, L as prepareChatBody, M as classifyUpstreamError, N as extractDisplayErrorMessage, P as modelWithCurrentPromotion, Q as CN_APP_VERSION_FILENAME, R as prepareCnChatBody, S as atRestKeyProviderFor, T as WORKBUDDY_VARIANTS, V as channelCompatSnapshot, W as wireCaptureDir, X as probeModel, Y as PROBE_EFFORT_CANDIDATES, Z as randomSentinel, _ as defaultDesktopAuthCandidates, a as isHeartbeatProcessAlive, at as WORKBUDDY_APP_VERSION_FILENAME, b as parseWorkBuddyAuth, c as workbuddyHostHeartbeatPath, ct as readBundleVersion, d as FALLBACK_WORKBUDDY_AI_MODELS, et as chatUserAgent, f as FALLBACK_WORKBUDDY_MODELS, g as WorkBuddyCredentialStore, h as WORKBUDDY_AUTH_FILE_ENV, i as clearHostHeartbeat, it as validCliVersion, j as WorkBuddyUpstreamClient, k as WORKBUDDY_UPDATE_PATH, l as writeHostHeartbeat, lt as resolveAppVersion, m as WORKBUDDY_AUTH_FILENAME, nt as readCliVersion, o as processStartTimeMs, ot as appUserAgent, p as WorkBuddyCatalog, r as WORKBUDDY_HOST_HEARTBEAT_FILENAME, rt as resolveChatIdentity, s as readHostHeartbeat, st as installedAppVersion, t as versionDrift, tt as fallbackChatIdentity, u as WORKBUDDY_CONNECT_VERSION, ut as validAppVersion, v as defaultDesktopAuthPath, w as CN_VARIANT, x as workbuddyOwnAuthPath, y as desktopAuthCandidatesFor, z as prepareInternationalChatBody } from "./version-resolve-Ciac7LIC.js";
+import { $ as CN_APP_VERSION_FILENAME, A as CHANNEL_REJECTED_MESSAGE, B as regionOf, C as AI_VARIANT, E as variantFor, F as normalizeCredits, G as wireCaptureDir, H as channelCompatSnapshot, I as parseModelCatalog, K as wireCaptureEnabled, L as prepareChatBody, M as classifyUpstreamError, N as extractDisplayErrorMessage, P as modelWithCurrentPromotion, Q as randomSentinel, R as prepareCnChatBody, S as atRestKeyProviderFor, T as WORKBUDDY_VARIANTS, U as readWireLedgerTail, V as relocateCnSystemPrompt, X as PROBE_EFFORT_CANDIDATES, Z as probeModel, _ as defaultDesktopAuthCandidates, a as isHeartbeatProcessAlive, at as validCliVersion, b as parseWorkBuddyAuth, c as workbuddyHostHeartbeatPath, ct as installedAppVersion, d as FALLBACK_WORKBUDDY_AI_MODELS, dt as validAppVersion, et as FALLBACK_CN_APP_VERSION, f as FALLBACK_WORKBUDDY_MODELS, g as WorkBuddyCredentialStore, h as WORKBUDDY_AUTH_FILE_ENV, i as clearHostHeartbeat, it as resolveChatIdentity, j as WorkBuddyUpstreamClient, k as WORKBUDDY_UPDATE_PATH, l as writeHostHeartbeat, lt as readBundleVersion, m as WORKBUDDY_AUTH_FILENAME, nt as fallbackChatIdentity, o as processStartTimeMs, ot as WORKBUDDY_APP_VERSION_FILENAME, p as WorkBuddyCatalog, r as WORKBUDDY_HOST_HEARTBEAT_FILENAME, rt as readCliVersion, s as readHostHeartbeat, st as appUserAgent, t as versionDrift, tt as chatUserAgent, u as WORKBUDDY_CONNECT_VERSION, ut as resolveAppVersion, v as defaultDesktopAuthPath, w as CN_VARIANT, x as workbuddyOwnAuthPath, y as desktopAuthCandidatesFor, z as prepareInternationalChatBody } from "./version-resolve-B7sR-U9e.js";
 import z from "@deepseek-ai/schemastery";
 import { RetryPolicySchema, resolveImageAttachmentAccess, resolveRetryPolicy } from "@deepseek-ai/dsh-llm";
 import { dirname, join, resolve } from "node:path";
@@ -941,13 +941,44 @@ function createWorkBuddyShim(options) {
 	* repeating them would only multiply the user's wait. A client disconnect
 	* (`signal` aborted) stops the loop before it starts a fresh request, since
 	* the caller is gone and the retry would be billed for nobody.
+	*
+	* A refusal is handled in two steps, in this order, because the measured
+	* cause is the *system role*, not a transient fault:
+	*
+	* 1. **Relocate, once, immediately.** Moving the system text into a leading
+	*    user turn answered 200 on the same body, token and host, so repeating
+	*    the identical body would be a wasted round trip. This step changes the
+	*    body instead of the timing, so it runs with no backoff.
+	* 2. **Then the configured backoff, on the relocated body.** If the relocation
+	*    did not apply (no system text) or the upstream refuses it too, the loop
+	*    falls back to the previous behavior — a small number of spaced attempts,
+	*    which is what the 10-22 evidence says can still ride out a server-side
+	*    window.
 	*/
 	async function chatWithChannelRetry(prepared, credential, signal) {
-		let result = await client.chatStream(credential, prepared, signal, { attempt: 0 });
+		let body = prepared;
+		let attempt = 0;
+		let result = await client.chatStream(credential, body, signal, { attempt });
+		const relocation = !result.ok && result.kind === "channel_rejected" && client.channelCompatEnabled === true && regionOf(credential.domain) === "cn" ? relocateCnSystemPrompt(body) : {
+			body,
+			applied: false,
+			charsMoved: 0
+		};
+		if (relocation.applied && !signal.aborted) {
+			attempt++;
+			body = relocation.body;
+			onRetry?.({
+				attempt,
+				delayMs: 0,
+				kind: "channel_rejected"
+			});
+			logger?.warn(`dsh-workbuddy-connect: upstream refused the channel; retrying with the system prompt relocated into a leading user turn (${relocation.charsMoved} chars)`);
+			result = await client.chatStream(credential, body, signal, { attempt });
+		}
 		for (let index = 0; index < retryDelays.length; index++) {
 			if (result.ok || result.kind !== "channel_rejected" || signal.aborted) break;
 			const delayMs = retryDelays[index] ?? 0;
-			const attempt = index + 1;
+			attempt++;
 			onRetry?.({
 				attempt,
 				delayMs,
@@ -956,7 +987,7 @@ function createWorkBuddyShim(options) {
 			logger?.warn(`dsh-workbuddy-connect: upstream refused the channel; retrying in ${delayMs}ms (attempt ${attempt}/${retryDelays.length})`);
 			await retrySleep(delayMs);
 			if (signal.aborted) break;
-			result = await client.chatStream(credential, prepared, signal, { attempt });
+			result = await client.chatStream(credential, body, signal, { attempt });
 		}
 		return result;
 	}
@@ -2338,7 +2369,7 @@ function channelCompatSection(runtime, ledger) {
 	const lastStatus = live?.status ?? ledger?.result?.status;
 	const lastOutcome = live?.kind ?? ledger?.result?.kind;
 	return {
-		ruleVersion: live?.digest?.ruleVersion ?? "cn-dsh-compat-v3",
+		ruleVersion: live?.digest?.ruleVersion ?? "cn-dsh-compat-v4",
 		enabled: runtime.client.channelCompatEnabled,
 		captureEnabled,
 		...captureEnabled ? { captureDir: wireCaptureDir() } : {},
@@ -2981,4 +3012,4 @@ function apply(ctx, config) {
 	});
 }
 //#endregion
-export { AI_VARIANT, CN_APP_VERSION_FILENAME, CN_VARIANT, Config, FALLBACK_CN_APP_VERSION, FALLBACK_WORKBUDDY_AI_MODELS, FALLBACK_WORKBUDDY_MODELS, PROBE_EFFORT_CANDIDATES, WORKBUDDY_AI_SETTINGS_NS, WORKBUDDY_APP_VERSION_FILENAME, WORKBUDDY_AUTH_FILENAME, WORKBUDDY_AUTH_FILE_ENV, WORKBUDDY_CATALOG_FILENAME, WORKBUDDY_HOST_HEARTBEAT_FILENAME, WORKBUDDY_PROBE_FILENAME, WORKBUDDY_PROVIDER, WORKBUDDY_SETTINGS_NS, WORKBUDDY_STREAM_IDLE_TIMEOUT_MS, WORKBUDDY_VARIANTS, WORKBUDDY_VISIBILITY_FILENAME, WorkBuddyCatalog, WorkBuddyCatalogStore, WorkBuddyCredentialStore, WorkBuddyProbeService, WorkBuddyProbeStore, WorkBuddyUpstreamClient, WorkBuddyVisibilityStore, appUserAgent, apply, chatUserAgent, classifyUpstreamError, clearHostHeartbeat, createWorkBuddyAdapter, createWorkBuddyShim, defaultDesktopAuthCandidates, defaultDesktopAuthPath, desktopAuthCandidatesFor, fallbackChatIdentity, fingerprintModel, inject, installedAppVersion, isHeartbeatProcessAlive, modelWithCurrentPromotion, name, normalizeCredits, parseModelCatalog, parseWorkBuddyAuth, prepareChatBody, prepareCnChatBody, prepareInternationalChatBody, probeModel, processStartTimeMs, randomSentinel, readBundleVersion, readCliVersion, readHostHeartbeat, regionOf, resolveAppVersion, resolveChatIdentity, validAppVersion, validCliVersion, variantFor, visibilityAccountOf, workbuddyCatalogPath, workbuddyHostHeartbeatPath, workbuddyOwnAuthPath, workbuddyProbePath, workbuddyVisibilityPath };
+export { AI_VARIANT, CN_APP_VERSION_FILENAME, CN_VARIANT, Config, FALLBACK_CN_APP_VERSION, FALLBACK_WORKBUDDY_AI_MODELS, FALLBACK_WORKBUDDY_MODELS, PROBE_EFFORT_CANDIDATES, WORKBUDDY_AI_SETTINGS_NS, WORKBUDDY_APP_VERSION_FILENAME, WORKBUDDY_AUTH_FILENAME, WORKBUDDY_AUTH_FILE_ENV, WORKBUDDY_CATALOG_FILENAME, WORKBUDDY_HOST_HEARTBEAT_FILENAME, WORKBUDDY_PROBE_FILENAME, WORKBUDDY_PROVIDER, WORKBUDDY_SETTINGS_NS, WORKBUDDY_STREAM_IDLE_TIMEOUT_MS, WORKBUDDY_VARIANTS, WORKBUDDY_VISIBILITY_FILENAME, WorkBuddyCatalog, WorkBuddyCatalogStore, WorkBuddyCredentialStore, WorkBuddyProbeService, WorkBuddyProbeStore, WorkBuddyUpstreamClient, WorkBuddyVisibilityStore, appUserAgent, apply, chatUserAgent, classifyUpstreamError, clearHostHeartbeat, createWorkBuddyAdapter, createWorkBuddyShim, defaultDesktopAuthCandidates, defaultDesktopAuthPath, desktopAuthCandidatesFor, fallbackChatIdentity, fingerprintModel, inject, installedAppVersion, isHeartbeatProcessAlive, modelWithCurrentPromotion, name, normalizeCredits, parseModelCatalog, parseWorkBuddyAuth, prepareChatBody, prepareCnChatBody, prepareInternationalChatBody, probeModel, processStartTimeMs, randomSentinel, readBundleVersion, readCliVersion, readHostHeartbeat, regionOf, relocateCnSystemPrompt, resolveAppVersion, resolveChatIdentity, validAppVersion, validCliVersion, variantFor, visibilityAccountOf, workbuddyCatalogPath, workbuddyHostHeartbeatPath, workbuddyOwnAuthPath, workbuddyProbePath, workbuddyVisibilityPath };

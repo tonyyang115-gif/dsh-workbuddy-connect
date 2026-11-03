@@ -13,7 +13,7 @@ import { chatUserAgent, fallbackChatIdentity, resolveChatIdentity, type ChatIden
 import type { WorkBuddyCredential } from './auth.ts'
 import type { ProbeAttempt } from './probe.ts'
 import { PROBE_MAX_TOKENS, PROBE_PROMPT } from './probe.ts'
-import { digestChannelCompat, rewriteChannelIdentity, type ChannelCompatDigest } from './channel-compat.ts'
+import { digestChannelCompat, relocateSystemPrompt, rewriteChannelIdentity, type ChannelCompatDigest } from './channel-compat.ts'
 import {
   noteChannelCompat,
   noteChannelOutcome,
@@ -1798,6 +1798,34 @@ export function prepareCnChatBody(source: string, options: { enableCnChannelComp
   return JSON.stringify(rewriteChannelIdentity(body, {
     region: 'cn', enabled: options.enableCnChannelCompat === true,
   }).body)
+}
+
+/**
+ * String-level form of {@link relocateSystemPrompt} for the shim's fallback.
+ *
+ * The shim holds the body as JSON text, not as an object, and it is the layer
+ * that sees the refusal verdict. Parsing here keeps the relocation rule in one
+ * place (`channel-compat.ts`) instead of giving the shim its own copy of the
+ * message-rewriting shape. A body that is not a JSON object comes back
+ * unchanged with `applied: false`.
+ *
+ * The result is *not* re-normalised: {@link WorkBuddyUpstreamClient.chatStream}
+ * still applies {@link prepareCnChatBody} afterwards, and the moved text now
+ * sits in a `user` turn, which those rules intentionally do not touch.
+ */
+export function relocateCnSystemPrompt(source: string): { body: string; applied: boolean; charsMoved: number } {
+  let body: unknown
+  try {
+    body = JSON.parse(source)
+  } catch {
+    return { body: source, applied: false, charsMoved: 0 }
+  }
+  const result = relocateSystemPrompt(body, { region: 'cn', enabled: true })
+  return {
+    body: result.applied ? JSON.stringify(result.body) : source,
+    applied: result.applied,
+    charsMoved: result.charsMoved,
+  }
 }
 
 export function prepareInternationalChatBody(source: string): string {

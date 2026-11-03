@@ -36,7 +36,7 @@ const RECORD = {
     body: { model: 'hy3', maxTokens: 64_000, messageCount: 6, roles: ['system', 'user'], toolCount: 63, stream: true },
     identity: { clientVersion: '5.8.3', cliVersion: '2.161.0', userAgent: 'WorkBuddy/5.8.3' },
     compat: {
-      ruleVersion: 'cn-dsh-compat-v3',
+      ruleVersion: 'cn-dsh-compat-v4',
       region: 'cn',
       enabled: true,
       systemMessages: 1,
@@ -109,7 +109,7 @@ describe('status channel compat from the ledger', () => {
     expect(compat).toMatchObject({
       captureEnabled: true,
       enabled: true,
-      ruleVersion: 'cn-dsh-compat-v3',
+      ruleVersion: 'cn-dsh-compat-v4',
       lastStatus: 400,
       lastOutcome: 'channel_rejected',
       model: 'hy3',
@@ -132,7 +132,7 @@ describe('status channel compat from the ledger', () => {
     process.env.DSH_WORKBUDDY_CAPTURE = '1'
     await writeLedger(home)
     const { text } = await capture(['status'])
-    expect(text).toContain('Channel compat: prompt rewrite on (cn-dsh-compat-v3) · model hy3 · last request 2026-10-22T02:52:57.926Z → 400 channel_rejected')
+    expect(text).toContain('Channel compat: prompt rewrite on (cn-dsh-compat-v4) · model hy3 · last request 2026-10-22T02:52:57.926Z → 400 channel_rejected')
     expect(text).toContain('system prompt: 8740 → 8703 chars · opener changed · gui changed')
     expect(text).toContain('last paragraph starts: "You are interacting with the user through the DeepSeek Harness Web GUI"')
     expect(text).toContain('Capture: on → ')

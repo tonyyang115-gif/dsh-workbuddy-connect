@@ -41,7 +41,12 @@ interface Fixture {
  */
 async function startShim(
   answers: readonly WorkBuddyChatResult[],
-  options: { delaysMs?: readonly number[]; onSleep?: (index: number) => Promise<void> | void } = {},
+  options: {
+    delaysMs?: readonly number[]
+    onSleep?: (index: number) => Promise<void> | void
+    /** Report the compat path as enabled, as the real client does in production. */
+    compat?: boolean
+  } = {},
 ): Promise<Fixture> {
   const dir = await mkdtemp(join(tmpdir(), 'wb-retry-'))
   CLEANUP.push(() => rm(dir, { recursive: true, force: true }))
@@ -66,6 +71,7 @@ async function startShim(
     store,
     catalog: new WorkBuddyCatalog(),
     client: {
+      channelCompatEnabled: options.compat === true,
       async chatStream(_credential, bodyJson, _signal, context): Promise<WorkBuddyChatResult> {
         fixture.attempts.push({ body: bodyJson, attempt: context?.attempt })
         const answer = answers[Math.min(cursor, answers.length - 1)]
@@ -114,6 +120,23 @@ async function post(fixture: Fixture): Promise<Response> {
     headers: { 'Content-Type': 'application/json', authorization: `Bearer ${fixture.shim.token()}` },
     body: JSON.stringify({ model: 'hy3', messages: [{ role: 'user', content: 'fixture' }] }),
   })
+}
+
+/** POST an arbitrary body, for cases that care about the message roles. */
+async function postBody(fixture: Fixture, body: unknown): Promise<Response> {
+  return fetch(`${fixture.shim.baseUrl()}/v1/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', authorization: `Bearer ${fixture.shim.token()}` },
+    body: JSON.stringify(body),
+  })
+}
+
+const HARNESS_BODY = {
+  model: 'hy3',
+  messages: [
+    { role: 'system', content: 'Long harness instructions.' },
+    { role: 'user', content: 'hello' },
+  ],
 }
 
 beforeEach(() => {
@@ -193,6 +216,54 @@ describe('channel-refusal retry', () => {
     await expect(request).rejects.toThrow()
     // Give the handler a turn to observe the abort it triggered on `res`.
     await new Promise(resolve => setTimeout(resolve, 20))
+    expect(fixture.attempts).toHaveLength(1)
+  })
+})
+
+/**
+ * The measured cause of the CN refusal is the system role's *content*, not a
+ * transient fault, so the first reaction is to change the body rather than the
+ * timing: the same text in a leading user turn answered 200 on the wire.
+ */
+describe('system-prompt relocation fallback', () => {
+  it('moves the system prompt into a user turn and retries immediately', async () => {
+    const fixture = await startShim([refused(), answered()], { delaysMs: [], compat: true })
+    const response = await postBody(fixture, HARNESS_BODY)
+    expect(response.status).toBe(200)
+    expect(await response.text()).toContain('[DONE]')
+    expect(fixture.attempts).toHaveLength(2)
+    // No backoff was waited: the retry changed the body, not the timing.
+    expect(fixture.waits).toEqual([])
+    expect(fixture.retries).toEqual([{ attempt: 1, delayMs: 0, kind: 'channel_rejected' }])
+    const relocated = JSON.parse(fixture.attempts[1]!.body) as { messages: Array<{ role: string; content: string }> }
+    expect(relocated.messages[0]).toEqual({ role: 'system', content: 'You are a helpful AI assistant.' })
+    expect(relocated.messages[1]?.role).toBe('user')
+    expect(relocated.messages[1]?.content).toContain('Long harness instructions.')
+    expect(relocated.messages[2]).toEqual({ role: 'user', content: 'hello' })
+  })
+
+  it('keeps the original body when compat is disabled', async () => {
+    const fixture = await startShim([refused(), answered()], { delaysMs: [] })
+    const response = await postBody(fixture, HARNESS_BODY)
+    expect(response.status).toBe(400)
+    expect(fixture.attempts).toHaveLength(1)
+    expect((JSON.parse(fixture.attempts[0]!.body) as { messages: unknown }).messages).toEqual(HARNESS_BODY.messages)
+  })
+
+  it('falls back to the configured backoff when relocation does not help', async () => {
+    const fixture = await startShim([refused(), refused(), answered()], { compat: true })
+    const response = await postBody(fixture, HARNESS_BODY)
+    expect(response.status).toBe(200)
+    // attempt 0 original, attempt 1 relocated, attempt 2 relocated + 500ms wait.
+    expect(fixture.attempts.map(attempt => attempt.attempt)).toEqual([0, 1, 2])
+    expect(fixture.waits).toEqual([500])
+    expect(fixture.attempts[2]!.body).toBe(fixture.attempts[1]!.body)
+  })
+
+  it('does not relocate a body with no system message', async () => {
+    const fixture = await startShim([refused(), refused()], { delaysMs: [], compat: true })
+    const response = await postBody(fixture, { model: 'hy3', messages: [{ role: 'user', content: 'only' }] })
+    expect(response.status).toBe(400)
     expect(fixture.attempts).toHaveLength(1)
   })
 })

@@ -75,6 +75,13 @@ describe('peer manifest pins the verified DSH cores', () => {
    * official atomic-write helper. Local checks do not replace Desktop
    * acceptance testing.
    *
+   * dshfix.6 adds the second measured arm: DSH Desktop shipped 0.2.1-rc.3 on
+   * 2026-10-23 and the exact-rc.2 pin made the plugin manager refuse to load
+   * this plugin at all (the whole WorkBuddy model group disappeared). Both arms
+   * are now listed explicitly and caret-free — still a closed list, no `^`, but
+   * an OR of two cores that were actually run, so a host patch release no
+   * longer takes the provider away.
+   *
    * #74's lesson on top of it: pi-ai must NOT be a dual-arm range. An
    * in-place upgrade from a 0.6.x-era pnpm profile keeps satisfying
    * `^0.85.1 || ^0.87.1` with the old 0.85.1 install, reproducing #69's
@@ -94,12 +101,15 @@ describe('peer manifest pins the verified DSH cores', () => {
     '@deepseek-ai/dsh-settings',
   ] as const
 
+  /** The two DSH cores this release was smoke-tested on, in ascending order. */
+  const VERIFIED_CORES = '0.2.1-rc.2 || 0.2.1-rc.3'
+
   it('each DSH service peer is an exact, caret-free list of verified cores', () => {
     const pkg = JSON.parse(
       readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
     ) as { peerDependencies: Record<string, string> }
     for (const name of DSH_SERVICE_PEERS) {
-      expect(pkg.peerDependencies[name], `${name} missing from peerDependencies`).toBe('0.2.1-rc.2')
+      expect(pkg.peerDependencies[name], `${name} missing from peerDependencies`).toBe(VERIFIED_CORES)
     }
   })
 

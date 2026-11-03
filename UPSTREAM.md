@@ -3,7 +3,7 @@
 ## Source snapshots
 
 - `upstream/` contains all 134 tracked files exported from local upstream commit `c0ed88e3712d3bb2e2deff5fddec1181e6222973` (`corrinehu/dsh-workbuddy-connect`). File-by-file comparison against that local checkout passed.
-- `adapted/` contains the complete current adaptation snapshot: the tracked source at local commit `885e5fb`, all current `.5` working-tree changes, rebuilt `lib/` output, and new tests. File-by-file comparison against the working tree passed (143 files). The source working tree itself was not changed.
+- `adapted/` contains the complete current adaptation snapshot at version `0.7.9+dshfix.6` (143 files). It was prepared from local branch `fix/workbuddy-cn-channel-compat`, based at commit `885e5fb`, together with the current `.6` working-tree changes and rebuilt `lib/` output. The `.6` changes were uncommitted in the source checkout when this snapshot was prepared; this archive commit records the published files. Six lockfile specifiers were aligned to `package.json` for frozen-lockfile validation; the locked dependency versions were kept unchanged.
 - Each source tree keeps its original license and notices. The package metadata inside `adapted/` still identifies the upstream project; this archive does not change runtime or package metadata.
 
 ## History and future updates
@@ -16,7 +16,7 @@ The original `.github/workflows/` directories are retained inside `upstream/` an
 
 ## Validation and known limitation
 
-On Node.js 24.14.1, both TypeScript checks passed, Vitest reported 1042 passed / 7 skipped, and the build completed. The standard `pnpm run check` wrapper was not usable in the non-interactive maintenance shell because pnpm attempted to replace `node_modules`; the existing dependency directory was left intact and equivalent checks were run directly.
+On Node.js 22.14.0, both TypeScript checks passed, Vitest reported 1056 passed / 7 skipped (64 test files passed, 1 skipped), and the build completed. `pnpm install --lockfile-only --frozen-lockfile --ignore-scripts` also passed after the six lockfile specifiers were aligned; the locked package versions were unchanged. Typecheck, test, and build checks used the existing dependency installation; the standard `pnpm run check` wrapper was not used because pnpm had previously attempted to replace `node_modules` in the non-interactive maintenance shell.
 
 A clean install and build from a fresh clone have not been verified. The maintenance environment has `node_modules/unrun` linked to `/tmp/wb-build-tools`, while `unrun` is not declared in the package manifest. That dependency issue was deliberately deferred, so this archive provides complete source-file snapshots but does not claim a reproducible clean build until that follow-up is addressed.
 

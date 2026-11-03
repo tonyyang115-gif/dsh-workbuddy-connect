@@ -66,7 +66,7 @@ export interface WorkBuddyWebProbeSection {
  * field is a decision or a count — no message text, no token.
  */
 export interface WorkBuddyWebChannelCompat {
-  /** Rule version that produced the rewrite, e.g. `cn-dsh-compat-v3`. */
+  /** Rule version that produced the rewrite, e.g. `cn-dsh-compat-v4`. */
   ruleVersion: string
   /** The resolved `enableCnChannelCompat` this host is running with. */
   enabled: boolean

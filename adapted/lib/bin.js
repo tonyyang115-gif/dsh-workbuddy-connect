@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { E as variantFor, G as wireCaptureEnabled, H as readWireLedgerTail, K as wireCaptureFile, S as atRestKeyProviderFor, T as WORKBUDDY_VARIANTS, U as setWireCapture, W as wireCaptureDir, a as isHeartbeatProcessAlive, c as workbuddyHostHeartbeatPath, d as FALLBACK_WORKBUDDY_AI_MODELS, f as FALLBACK_WORKBUDDY_MODELS, g as WorkBuddyCredentialStore, j as WorkBuddyUpstreamClient, lt as resolveAppVersion, n as versionDriftWarning, q as wireCaptureState, s as readHostHeartbeat, t as versionDrift, u as WORKBUDDY_CONNECT_VERSION, w as CN_VARIANT } from "./version-resolve-Ciac7LIC.js";
+import { E as variantFor, G as wireCaptureDir, J as wireCaptureState, K as wireCaptureEnabled, S as atRestKeyProviderFor, T as WORKBUDDY_VARIANTS, U as readWireLedgerTail, W as setWireCapture, a as isHeartbeatProcessAlive, c as workbuddyHostHeartbeatPath, d as FALLBACK_WORKBUDDY_AI_MODELS, f as FALLBACK_WORKBUDDY_MODELS, g as WorkBuddyCredentialStore, j as WorkBuddyUpstreamClient, n as versionDriftWarning, q as wireCaptureFile, s as readHostHeartbeat, t as versionDrift, u as WORKBUDDY_CONNECT_VERSION, ut as resolveAppVersion, w as CN_VARIANT } from "./version-resolve-B7sR-U9e.js";
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 //#region src/bin.ts

@@ -208,7 +208,7 @@ describe('channel-compat reporting', () => {
   it('reports the live switch before any request has been captured', async () => {
     const port = await startStatusServer({
       channelCompat: () => ({
-        ruleVersion: 'cn-dsh-compat-v3',
+        ruleVersion: 'cn-dsh-compat-v4',
         enabled: true,
         captureEnabled: false,
       }),
@@ -216,7 +216,7 @@ describe('channel-compat reporting', () => {
     const response = await requestOnce({ port, method: 'GET', headers: { host: '127.0.0.1' } })
     const document = JSON.parse(response.body) as { channelCompat?: Record<string, unknown> }
     expect(document.channelCompat).toMatchObject({
-      ruleVersion: 'cn-dsh-compat-v3',
+      ruleVersion: 'cn-dsh-compat-v4',
       enabled: true,
       captureEnabled: false,
     })
@@ -229,7 +229,7 @@ describe('channel-compat reporting', () => {
   it('carries the decision and the capture location once a request has been seen', async () => {
     const port = await startStatusServer({
       channelCompat: () => ({
-        ruleVersion: 'cn-dsh-compat-v3',
+        ruleVersion: 'cn-dsh-compat-v4',
         enabled: true,
         captureEnabled: true,
         captureDir: '/tmp/fixture/workbuddy-wire',

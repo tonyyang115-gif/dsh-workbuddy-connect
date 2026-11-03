@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { digestChannelCompat, rewriteChannelIdentity } from '../src/channel-compat.ts'
+import { digestChannelCompat, relocateSystemPrompt, rewriteChannelIdentity } from '../src/channel-compat.ts'
 
 const ORIGINAL = 'You are an AI agent powered by DeepSeek Harness.'
 const NEUTRAL = 'You are an AI agent.'
@@ -28,7 +28,7 @@ describe('cn-dsh-prefix-v1 text contract', () => {
       unknown: { retained: true },
     })
     const result = rewriteChannelIdentity(input, ENABLED)
-    expect(result).toMatchObject({ matchedMessages: 1, unsupportedLayouts: 0, ruleVersion: 'cn-dsh-compat-v3' })
+    expect(result).toMatchObject({ matchedMessages: 1, unsupportedLayouts: 0, ruleVersion: 'cn-dsh-compat-v4' })
     expect(result.body).toEqual({
       ...input, messages: [{ role: 'system', content: NEUTRAL + '\nKeep every instruction.' }, ...input.messages.slice(1)],
     })
@@ -96,7 +96,7 @@ describe('cn-dsh-web-gui-v1 guarded sentence contract', () => {
     })
     const result = rewriteChannelIdentity(input, ENABLED)
     const output = result.body as typeof input
-    expect(result).toMatchObject({ matchedMessages: 1, unsupportedLayouts: 0, ruleVersion: 'cn-dsh-compat-v3' })
+    expect(result).toMatchObject({ matchedMessages: 1, unsupportedLayouts: 0, ruleVersion: 'cn-dsh-compat-v4' })
     expect(output).toEqual({ ...input, messages: [{ ...input.messages[0], content: NEUTRAL + '\n\n' + GUI_PARAGRAPH.replace(GUI, CURRENT_GUI) }, ...input.messages.slice(1)] })
     expect(output.tools).toBe(input.tools)
     expect(output.extra).toBe(input.extra)
@@ -295,5 +295,75 @@ describe('array layout and bypass contract', () => {
     expect(Object.hasOwn(result.body as object, '__proto__')).toBe(true)
     expect(({} as Record<string, unknown>).preserve).toBeUndefined()
     expect(result.matchedMessages).toBe(1)
+  })
+})
+
+describe('cn-dsh-relocation-v1 fallback contract', () => {
+  it('moves system text into a leading user turn and keeps every other message as-is', () => {
+    const input = freeze({
+      model: 'hy3',
+      tools: [{ type: 'function', function: { name: 'read', parameters: { type: 'object' } } }],
+      messages: [
+        { role: 'system', content: 'Long harness instructions.', tag: 'replaced' },
+        { role: 'user', content: 'hello' },
+        { role: 'assistant', content: 'hi' },
+      ],
+    })
+    const result = relocateSystemPrompt(input, ENABLED)
+    expect(result).toMatchObject({
+      applied: true, charsMoved: 'Long harness instructions.'.length, ruleVersion: 'cn-dsh-compat-v4',
+    })
+    const output = result.body as typeof input
+    expect(output.tools).toBe(input.tools)
+    expect(output.messages[0]).toEqual({ role: 'system', content: 'You are a helpful AI assistant.' })
+    expect(output.messages[1]?.role).toBe('user')
+    expect(String(output.messages[1]?.content)).toContain('Long harness instructions.')
+    expect(output.messages[1]?.content).toMatch(/^The following are your operating instructions for this conversation\.\n\n/)
+    // Caller-owned messages keep their identity, so nothing downstream is rebuilt.
+    expect(output.messages[2]).toBe(input.messages[1])
+    expect(output.messages[3]).toBe(input.messages[2])
+    expect(input.messages[0]?.content).toBe('Long harness instructions.')
+  })
+
+  it('is idempotent: a relocated body has no system text left to move', () => {
+    const first = relocateSystemPrompt(body('Instructions.'), ENABLED)
+    expect(relocateSystemPrompt(first.body, ENABLED)).toMatchObject({ applied: false, charsMoved: 0 })
+  })
+
+  it('joins text blocks and refuses layouts it cannot read', () => {
+    const blocks = relocateSystemPrompt(body([{ type: 'text', text: 'A' }, { type: 'text', text: 'B' }]), ENABLED)
+    expect(blocks.applied).toBe(true)
+    expect(String((blocks.body as { messages: { content: unknown }[] }).messages[1]?.content)).toContain('A\n\nB')
+    const image = freeze(body([{ type: 'image_url', image_url: { url: 'fixture' } }]))
+    expect(relocateSystemPrompt(image, ENABLED)).toMatchObject({ applied: false, body: image })
+  })
+
+  it.each([
+    ['disabled', { region: 'cn' as const, enabled: false }],
+    ['global', { region: 'global' as const, enabled: true }],
+  ])('does not apply when %s', (_label, options) => {
+    const input = body('Instructions.')
+    expect(relocateSystemPrompt(input, options)).toMatchObject({ applied: false, body: input })
+  })
+
+  it.each([
+    ['no messages', { model: 'hy3' }],
+    ['no system text', { messages: [{ role: 'user', content: 'hi' }] }],
+    ['empty system', body('   \n')],
+    ['null message entries', { messages: [null, 7] }],
+  ])('returns the body untouched for %s', (_label, input) => {
+    const result = relocateSystemPrompt(input, ENABLED)
+    expect(result).toMatchObject({ applied: false, charsMoved: 0 })
+    expect(result.body).toBe(input)
+  })
+
+  it('handles a null body and keeps developer messages in the moved text', () => {
+    expect(relocateSystemPrompt(null, ENABLED)).toMatchObject({ applied: false })
+    const result = relocateSystemPrompt({ messages: [
+      { role: 'developer', content: 'Dev rules.' },
+      { role: 'user', content: 'go' },
+    ] }, ENABLED)
+    expect(result.applied).toBe(true)
+    expect(result.charsMoved).toBe('Dev rules.'.length)
   })
 })

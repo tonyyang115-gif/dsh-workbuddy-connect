@@ -21,7 +21,7 @@ import { Readable } from 'node:stream'
 import type { WorkBuddyCredentialStore } from './auth.ts'
 import type { WorkBuddyCatalog } from './catalog.ts'
 import { bindToUsablePort, hostIsLoopback, originIsLoopback } from './loopback.ts'
-import { CHANNEL_REJECTED_MESSAGE, extractDisplayErrorMessage, prepareChatBody, WorkBuddyUpstreamClient, type UpstreamErrorKind, type WorkBuddyChatResult } from './upstream.ts'
+import { CHANNEL_REJECTED_MESSAGE, extractDisplayErrorMessage, prepareChatBody, regionOf, relocateCnSystemPrompt, WorkBuddyUpstreamClient, type UpstreamErrorKind, type WorkBuddyChatResult } from './upstream.ts'
 
 /** Minimal logger surface the plugin context already provides. */
 export interface ShimLogger {
@@ -49,7 +49,12 @@ export interface WorkBuddyShim {
 /** Constructor dependencies. */
 export interface WorkBuddyShimOptions {
   store: WorkBuddyCredentialStore
-  client: Pick<WorkBuddyUpstreamClient, 'chatStream'>
+  /**
+   * The upstream client. `channelCompatEnabled` is optional here because a test
+   * double has no compat path to report; when it is absent the shim treats the
+   * relocation fallback as disabled and sends the body it was given.
+   */
+  client: Pick<WorkBuddyUpstreamClient, 'chatStream'> & { channelCompatEnabled?: boolean }
   catalog: WorkBuddyCatalog
   logger?: ShimLogger
   /**
@@ -256,17 +261,49 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
    * repeating them would only multiply the user's wait. A client disconnect
    * (`signal` aborted) stops the loop before it starts a fresh request, since
    * the caller is gone and the retry would be billed for nobody.
+   *
+   * A refusal is handled in two steps, in this order, because the measured
+   * cause is the *system role*, not a transient fault:
+   *
+   * 1. **Relocate, once, immediately.** Moving the system text into a leading
+   *    user turn answered 200 on the same body, token and host, so repeating
+   *    the identical body would be a wasted round trip. This step changes the
+   *    body instead of the timing, so it runs with no backoff.
+   * 2. **Then the configured backoff, on the relocated body.** If the relocation
+   *    did not apply (no system text) or the upstream refuses it too, the loop
+   *    falls back to the previous behavior — a small number of spaced attempts,
+   *    which is what the 10-22 evidence says can still ride out a server-side
+   *    window.
    */
   async function chatWithChannelRetry(
     prepared: string,
     credential: Awaited<ReturnType<WorkBuddyCredentialStore['resolve']>>,
     signal: AbortSignal,
   ): Promise<WorkBuddyChatResult> {
-    let result = await client.chatStream(credential, prepared, signal, { attempt: 0 })
+    let body = prepared
+    let attempt = 0
+    let result = await client.chatStream(credential, body, signal, { attempt })
+    // The fallback is CN-only and only meaningful while the compat path is the
+    // one that built this body: with compat disabled the user asked for the
+    // body to be sent exactly as written.
+    const relocation = !result.ok && result.kind === 'channel_rejected'
+      && client.channelCompatEnabled === true && regionOf(credential.domain) === 'cn'
+      ? relocateCnSystemPrompt(body)
+      : { body, applied: false, charsMoved: 0 }
+    if (relocation.applied && !signal.aborted) {
+      attempt++
+      body = relocation.body
+      onRetry?.({ attempt, delayMs: 0, kind: 'channel_rejected' })
+      logger?.warn(
+        'dsh-workbuddy-connect: upstream refused the channel; retrying with the '
+        + `system prompt relocated into a leading user turn (${relocation.charsMoved} chars)`,
+      )
+      result = await client.chatStream(credential, body, signal, { attempt })
+    }
     for (let index = 0; index < retryDelays.length; index++) {
       if (result.ok || result.kind !== 'channel_rejected' || signal.aborted) break
       const delayMs = retryDelays[index] ?? 0
-      const attempt = index + 1
+      attempt++
       onRetry?.({ attempt, delayMs, kind: result.kind })
       logger?.warn(
         `dsh-workbuddy-connect: upstream refused the channel; retrying in ${delayMs}ms `
@@ -274,7 +311,7 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
       )
       await retrySleep(delayMs)
       if (signal.aborted) break
-      result = await client.chatStream(credential, prepared, signal, { attempt })
+      result = await client.chatStream(credential, body, signal, { attempt })
     }
     return result
   }
