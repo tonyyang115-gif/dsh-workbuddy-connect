@@ -7,3 +7,7 @@
 .env.*
 !**/.env.example
 AGENTS.md
+node_modules/
+coverage/
+.mimosa/
+.zcode/
