@@ -45,7 +45,9 @@
     "README.md",
     "README.en.md",
     "LICENSE",
-    "THIRD_PARTY_NOTICES.txt"
+    "THIRD_PARTY_NOTICES.txt",
+    "scripts",
+    "INSTALL.md"
   ],
   "license": "MIT",
   "repository": {
