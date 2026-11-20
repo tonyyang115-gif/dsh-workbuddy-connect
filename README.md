@@ -6,7 +6,8 @@
 > ```sh
 > dsh plugin --profile <desktop|web> add "github:tonyyang115-gif/dsh-workbuddy-connect#<commit-sha>"
 > ```
-> 完整步骤（含装完注册 bundle、常见报错处理）见 **[INSTALL.md](./INSTALL.md)**。
+> **装之前先加 `allowBuilds`**（profile 的 `pnpm-workspace.yaml`），否则 pnpm 返回 exit 1 会导致
+> bundles 不被自动注册、模型列表里看不到插件。完整步骤见 **[INSTALL.md](./INSTALL.md)**。
 >
 > 与原存档版的差异：
 > - 新增 `engines.dsh: "^0.2.1-rc.2"`，覆盖整个 DSH 0.2 线，不再逐版本撞 peer 门禁
